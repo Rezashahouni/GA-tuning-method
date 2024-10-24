@@ -1,0 +1,128 @@
+import matplotlib.pyplot as plt
+import numpy as np
+from geneticalgorithm import geneticalgorithm as ga
+
+
+class PIDController:
+    def __init__(self, Kp, Ki, Kd, setpoint):
+        self.Kp = Kp
+        self.Ki = Ki
+        self.Kd = Kd
+        self.setpoint = setpoint
+        self.integral = 0
+        self.previous_error = 0
+
+    def update(self, process_variable, dt):
+        error = self.setpoint - process_variable
+        self.integral += error * dt
+        derivative = (error - self.previous_error) / dt
+        output = self.Kp * error + self.Ki * self.integral + self.Kd * derivative
+        self.previous_error = error
+        return output
+
+
+# Simulation parameters
+time = np.linspace(0, 30, 3000)  # 30 seconds, 3000 points
+dt = time[1] - time[0]
+setpoints = np.piecewise(time,
+                         [time < 10, (time >= 10) & (time < 20), time >= 20],
+                         [5.0, 8.0, 10.0])
+
+
+# Define the objective function for GA
+def objective_function(params):
+    Kp, Ki, Kd = params
+    pid = PIDController(Kp, Ki, Kd, setpoints[0])
+    process_variable = 0.0
+    total_error = 0.0
+
+    for t, sp in zip(time, setpoints):
+        pid.setpoint = sp
+        control_signal = pid.update(process_variable, dt)
+        process_variable += control_signal * dt
+        total_error += abs(sp - process_variable)
+    return total_error
+
+
+# GA parameters
+varbound = np.array([[0, 10], [0, 1], [0, 1]])  # Define variable boundaries
+algorithm_param = {
+    'max_num_iteration': 200,
+    'population_size': 100,
+    'mutation_probability': 0.2,
+    'elit_ratio': 0.05,
+    'crossover_probability': 0.8,
+    'parents_portion': 0.4,
+    'crossover_type': 'uniform',
+    'max_iteration_without_improv': None
+}
+
+# Run the GA to find the optimal PID parameters
+model = ga(function=objective_function, dimension=3, variable_type='real', variable_boundaries=varbound,
+           algorithm_parameters=algorithm_param)
+model.run()
+
+# Get optimized parameters
+Kp_opt, Ki_opt, Kd_opt = model.output_dict['variable']
+
+# Initialize PID controller with optimized parameters
+pid = PIDController(Kp_opt, Ki_opt, Kd_opt, setpoints[0])
+
+# Process variables
+process_variable = 0.0
+process_values = []
+Kp_values = []
+Ki_values = []
+Kd_values = []
+
+# Simulation loop with optimized PID
+for t, sp in zip(time, setpoints):
+    pid.setpoint = sp
+    control_signal = pid.update(process_variable, dt)
+    process_variable += control_signal * dt  # Simple process model
+    process_values.append(process_variable)
+    Kp_values.append(pid.Kp)
+    Ki_values.append(pid.Ki)
+    Kd_values.append(pid.Kd)
+
+# Print final values
+print(f"Optimized PID parameters: Kp={Kp_opt}, Ki={Ki_opt}, Kd={Kd_opt}")
+print(f"Final process value: {process_values[-1]}")
+
+# Calculate settling time
+tolerance = 0.05 * setpoints[-1]  # 5% tolerance
+settling_time = None
+for i in range(len(time)):
+    if abs(process_values[i] - setpoints[i]) <= tolerance:
+        if all(abs(process_values[j] - setpoints[j]) <= tolerance for j in range(i, len(time))):
+            settling_time = time[i]
+            break
+if settling_time is not None:
+    print(f"Settling time: {settling_time:.2f} seconds")
+else:
+    print("The process variable did not settle within the specified tolerance.")
+
+# Plotting the results
+plt.figure(figsize=(12, 6))
+plt.subplot(2, 1, 1)
+plt.plot(time, process_values, label='Process Value')
+plt.plot(time, setpoints, label='Setpoint', linestyle='--')
+plt.axhline(setpoints[-1] + tolerance, color='r', linestyle='--', label='Upper Tolerance')
+plt.axhline(setpoints[-1] - tolerance, color='r', linestyle='--', label='Lower Tolerance')
+plt.xlabel('Time (min)')
+plt.ylabel('Process Value')
+plt.title('Process Variable and Setpoint')
+plt.legend()
+plt.grid(True)
+
+plt.subplot(2, 1, 2)
+plt.plot(time, Kp_values, label='Kp')
+plt.plot(time, Ki_values, label='Ki')
+plt.plot(time, Kd_values, label='Kd')
+plt.xlabel('Time (min)')
+plt.ylabel('PID Parameters')
+plt.title('PID Parameters Over Time')
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
